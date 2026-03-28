@@ -1,0 +1,229 @@
+import matplotlib
+matplotlib.use('Agg')
+import os, pathlib
+BASE = pathlib.Path(r'C:\Users\NGUYEN CHI DUNG\OneDrive\Documents\Dungncph67511 lab3 txldl\Lab3')
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+
+pdf = PdfPages(str(BASE / 'ITA105_Lab3_LoiGiai.pdf'))
+
+def save(fig):
+    pdf.savefig(fig, bbox_inches='tight')
+    plt.close(fig)
+
+def title_page(text):
+    fig = plt.figure(figsize=(14, 2))
+    fig.patch.set_facecolor('#1e1e2e')
+    plt.text(0.5, 0.5, text, ha='center', va='center',
+             fontsize=20, fontweight='bold', color='white',
+             transform=fig.transFigure)
+    plt.axis('off')
+    save(fig)
+
+# ──────────────────────────────────────────────
+# BÀI 1: SPORTS
+# ──────────────────────────────────────────────
+title_page('BÀI 1: Thông số vận động viên (Sports)')
+
+df1 = pd.read_csv(str(BASE / 'ITA105_Lab_3_Sports.csv'))
+print("=== BÀI 1 ===")
+print(df1.isnull().sum())
+print(df1.describe())
+
+fig, axes = plt.subplots(2, 5, figsize=(20, 8))
+fig.suptitle('Bài 1 - Histogram & Boxplot (dữ liệu gốc)', fontsize=14, fontweight='bold')
+for i, col in enumerate(df1.columns):
+    df1[col].hist(ax=axes[0, i], bins=15, color='steelblue', edgecolor='black')
+    axes[0, i].set_title(col, fontsize=9)
+    df1.boxplot(column=col, ax=axes[1, i])
+    axes[1, i].set_title(col, fontsize=9)
+plt.tight_layout()
+save(fig)
+
+mm1 = pd.DataFrame(MinMaxScaler().fit_transform(df1), columns=df1.columns)
+zs1 = pd.DataFrame(StandardScaler().fit_transform(df1), columns=df1.columns)
+
+fig, axes = plt.subplots(3, 5, figsize=(20, 12))
+fig.suptitle('Bài 1 - So sánh phân phối: Gốc / Min-Max / Z-Score', fontsize=14, fontweight='bold')
+colors = ['steelblue', 'orange', 'green']
+labels = ['Gốc', 'Min-Max [0,1]', 'Z-Score (mean=0)']
+for i, col in enumerate(df1.columns):
+    for j, (data, c, lbl) in enumerate(zip([df1, mm1, zs1], colors, labels)):
+        axes[j, i].hist(data[col], bins=15, color=c, edgecolor='black', alpha=0.8)
+        axes[j, i].set_title(f'{lbl}: {col}', fontsize=8)
+plt.tight_layout()
+save(fig)
+
+# ──────────────────────────────────────────────
+# BÀI 2: HEALTH
+# ──────────────────────────────────────────────
+title_page('BÀI 2: Chỉ số bệnh nhân (Health)')
+
+df2 = pd.read_csv(str(BASE / 'ITA105_Lab_3_Health.csv'))
+print("\n=== BÀI 2 ===")
+print(df2.isnull().sum())
+print(df2.describe())
+
+fig, axes = plt.subplots(2, 4, figsize=(18, 8))
+fig.suptitle('Bài 2 - Histogram & Boxplot (dữ liệu gốc)', fontsize=14, fontweight='bold')
+for i, col in enumerate(df2.columns):
+    df2[col].hist(ax=axes[0, i], bins=15, color='coral', edgecolor='black')
+    axes[0, i].set_title(col, fontsize=9)
+    df2.boxplot(column=col, ax=axes[1, i])
+    axes[1, i].set_title(col, fontsize=9)
+plt.tight_layout()
+save(fig)
+
+outlier_rows = []
+for col in df2.columns:
+    Q1, Q3 = df2[col].quantile(0.25), df2[col].quantile(0.75)
+    IQR = Q3 - Q1
+    mask = (df2[col] < Q1 - 1.5*IQR) | (df2[col] > Q3 + 1.5*IQR)
+    outlier_rows.append({'Biến': col, 'Số ngoại lệ': mask.sum(),
+                         'Giá trị min': df2[col].min(), 'Giá trị max': df2[col].max()})
+    print(f"Ngoại lệ [{col}]: {mask.sum()} dòng")
+
+fig, ax = plt.subplots(figsize=(10, 3))
+fig.suptitle('Bài 2 - Thống kê ngoại lệ theo IQR', fontsize=13, fontweight='bold')
+ax.axis('off')
+tbl = ax.table(cellText=[[r['Biến'], r['Số ngoại lệ'], f"{r['Giá trị min']:.2f}", f"{r['Giá trị max']:.2f}"] for r in outlier_rows],
+               colLabels=['Biến', 'Số ngoại lệ', 'Min', 'Max'],
+               loc='center', cellLoc='center')
+tbl.auto_set_font_size(False)
+tbl.set_fontsize(11)
+tbl.scale(1.2, 2)
+save(fig)
+
+mm2 = pd.DataFrame(MinMaxScaler().fit_transform(df2), columns=df2.columns)
+zs2 = pd.DataFrame(StandardScaler().fit_transform(df2), columns=df2.columns)
+
+fig, axes = plt.subplots(3, 4, figsize=(18, 12))
+fig.suptitle('Bài 2 - So sánh phân phối: Gốc / Min-Max / Z-Score', fontsize=14, fontweight='bold')
+for i, col in enumerate(df2.columns):
+    for j, (data, c, lbl) in enumerate(zip([df2, mm2, zs2], ['coral','orange','green'], ['Gốc','Min-Max','Z-Score'])):
+        axes[j, i].hist(data[col], bins=15, color=c, edgecolor='black', alpha=0.8)
+        axes[j, i].set_title(f'{lbl}: {col}', fontsize=8)
+plt.tight_layout()
+save(fig)
+
+fig, ax = plt.subplots(figsize=(12, 4))
+fig.suptitle('Bài 2 - Nhận xét', fontsize=13, fontweight='bold')
+ax.axis('off')
+nhanxet2 = [
+    '• BMI có giá trị 10.0 (cực nhỏ) và 50.0 (cực lớn) → bị ảnh hưởng nhiều bởi ngoại lệ.',
+    '• huyet_ap_mmHg có giá trị 250.0 là ngoại lệ rõ ràng → nén toàn bộ dữ liệu còn lại khi dùng Min-Max.',
+    '• Min-Max: khoảng [0,1] bị kéo lệch bởi ngoại lệ, phân phối cụm lại ở vùng hẹp.',
+    '• Z-Score: ít bị ảnh hưởng hơn, phân phối đều hơn, phù hợp hơn khi có ngoại lệ.',
+    '→ Kết luận: Z-Score phù hợp hơn cho dataset Health có ngoại lệ cực đoan.',
+]
+for k, line in enumerate(nhanxet2):
+    ax.text(0.02, 0.85 - k*0.18, line, fontsize=11, transform=ax.transAxes, va='top')
+save(fig)
+
+# ──────────────────────────────────────────────
+# BÀI 3: FINANCE
+# ──────────────────────────────────────────────
+title_page('BÀI 3: Chỉ số công ty (Finance)')
+
+df3 = pd.read_csv(str(BASE / 'ITA105_Lab_3_Finance.csv'))
+print("\n=== BÀI 3 ===")
+print(df3.isnull().sum())
+print(df3.describe())
+
+fig, axes = plt.subplots(1, 4, figsize=(18, 5))
+fig.suptitle('Bài 3 - Boxplot các biến (quan sát scale & ngoại lệ)', fontsize=14, fontweight='bold')
+for i, col in enumerate(df3.columns):
+    df3.boxplot(column=col, ax=axes[i])
+    axes[i].set_title(col, fontsize=10)
+plt.tight_layout()
+save(fig)
+
+mm3 = pd.DataFrame(MinMaxScaler().fit_transform(df3), columns=df3.columns)
+zs3 = pd.DataFrame(StandardScaler().fit_transform(df3), columns=df3.columns)
+
+fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+fig.suptitle('Bài 3 - Scatterplot: Doanh thu vs Lợi nhuận', fontsize=14, fontweight='bold')
+pairs = [(df3, 'steelblue', 'Dữ liệu gốc'),
+         (mm3, 'orange', 'Min-Max [0,1]'),
+         (zs3, 'green', 'Z-Score')]
+for ax, (data, c, lbl) in zip(axes, pairs):
+    ax.scatter(data['doanh_thu_musd'], data['loi_nhuan_musd'], alpha=0.6, color=c)
+    ax.set_title(lbl, fontsize=12, fontweight='bold')
+    ax.set_xlabel('doanh_thu_musd')
+    ax.set_ylabel('loi_nhuan_musd')
+plt.tight_layout()
+save(fig)
+
+fig, ax = plt.subplots(figsize=(12, 4))
+fig.suptitle('Bài 3 - Nhận xét & Thảo luận', fontsize=13, fontweight='bold')
+ax.axis('off')
+nhanxet3 = [
+    '• doanh_thu_musd có ngoại lệ 10,000 và 5,000 → Min-Max bị kéo mạnh, phần còn lại cụm sát 0.',
+    '• loi_nhuan_musd có ngoại lệ 500 và giá trị âm → Min-Max không phân biệt rõ các công ty thông thường.',
+    '• Min-Max KHÔNG phù hợp khi dữ liệu tài chính có công ty cực lớn/nhỏ (ngoại lệ mạnh).',
+    '• Linear Regression: nên dùng Z-Score → đảm bảo hệ số hồi quy có ý nghĩa thống nhất.',
+    '• KNN: nên dùng Z-Score → khoảng cách Euclidean công bằng, biến lớn không chi phối.',
+]
+for k, line in enumerate(nhanxet3):
+    ax.text(0.02, 0.88 - k*0.18, line, fontsize=11, transform=ax.transAxes, va='top')
+save(fig)
+
+# ──────────────────────────────────────────────
+# BÀI 4: GAMING
+# ──────────────────────────────────────────────
+title_page('BÀI 4: Người chơi trực tuyến (Gaming)')
+
+df4 = pd.read_csv(str(BASE / 'ITA105_Lab_3_Gaming.csv'))
+print("\n=== BÀI 4 ===")
+print(df4.isnull().sum())
+print(df4.describe())
+
+fig, axes = plt.subplots(2, 4, figsize=(18, 8))
+fig.suptitle('Bài 4 - Histogram & Boxplot (dữ liệu gốc)', fontsize=14, fontweight='bold')
+for i, col in enumerate(df4.columns):
+    df4[col].hist(ax=axes[0, i], bins=15, color='mediumpurple', edgecolor='black')
+    axes[0, i].set_title(col, fontsize=9)
+    df4.boxplot(column=col, ax=axes[1, i])
+    axes[1, i].set_title(col, fontsize=9)
+plt.tight_layout()
+save(fig)
+
+outlier_rows4 = []
+for col in df4.columns:
+    Q1, Q3 = df4[col].quantile(0.25), df4[col].quantile(0.75)
+    IQR = Q3 - Q1
+    mask = (df4[col] < Q1 - 1.5*IQR) | (df4[col] > Q3 + 1.5*IQR)
+    outlier_rows4.append({'Biến': col, 'Số ngoại lệ': mask.sum()})
+    print(f"Ngoại lệ [{col}]: {mask.sum()} người chơi")
+
+mm4 = pd.DataFrame(MinMaxScaler().fit_transform(df4), columns=df4.columns)
+zs4 = pd.DataFrame(StandardScaler().fit_transform(df4), columns=df4.columns)
+
+fig, axes = plt.subplots(3, 4, figsize=(18, 12))
+fig.suptitle('Bài 4 - So sánh phân phối: Gốc / Min-Max / Z-Score', fontsize=14, fontweight='bold')
+for i, col in enumerate(df4.columns):
+    for j, (data, c, lbl) in enumerate(zip([df4, mm4, zs4], ['mediumpurple','orange','teal'], ['Gốc','Min-Max','Z-Score'])):
+        axes[j, i].hist(data[col], bins=15, color=c, edgecolor='black', alpha=0.8)
+        axes[j, i].set_title(f'{lbl}: {col}', fontsize=8)
+plt.tight_layout()
+save(fig)
+
+fig, ax = plt.subplots(figsize=(12, 4))
+fig.suptitle('Bài 4 - Nhận xét & Thảo luận', fontsize=13, fontweight='bold')
+ax.axis('off')
+nhanxet4 = [
+    '• gio_choi: có người chơi 800 giờ (cày cuốc cực kỳ) và giá trị âm (lỗi dữ liệu) → ngoại lệ.',
+    '• diem_tich_luy: có giá trị 20,000 và -1,777 là ngoại lệ rõ ràng.',
+    '• Min-Max bị kéo bởi ngoại lệ → phần lớn người chơi bình thường cụm sát 0.',
+    '• Z-Score ổn định hơn, phân phối đều hơn, phù hợp cho Clustering và KNN.',
+    '→ Chọn Z-Score để chuẩn bị cho KNN/Clustering vì: khoảng cách Euclidean công bằng giữa các biến.',
+]
+for k, line in enumerate(nhanxet4):
+    ax.text(0.02, 0.88 - k*0.18, line, fontsize=11, transform=ax.transAxes, va='top')
+save(fig)
+
+pdf.close()
+print("\n✓ Đã xuất toàn bộ lời giải và biểu đồ vào file: ITA105_Lab3_LoiGiai.pdf")
