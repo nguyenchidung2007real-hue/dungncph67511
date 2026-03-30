@@ -1,0 +1,158 @@
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+import pandas as pd
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import pathlib
+
+BASE = pathlib.Path(r'C:\Users\NGUYEN CHI DUNG\OneDrive\Documents\Dungncph67511 lab3 txldl\PropTech')
+df = pd.read_csv(BASE / 'proptech_raw.csv', encoding='utf-8-sig')
+
+num_cols = ['dien_tich_m2','so_phong_ngu','so_wc','so_tang','gia_ty']
+cat_cols = ['loai_bds','tinh_trang','quan_huyen']
+
+# ================================================================
+# YEU CAU 1: KHAM PHA DU LIEU
+# ================================================================
+
+print("===== THONG KE MO TA =====")
+print(f"Shape: {df.shape}")
+print(df[num_cols].describe().round(2))
+
+print("\n===== MISSING VALUES =====")
+miss = df.isnull().sum()
+miss_pct = (miss / len(df) * 100).round(2)
+print(pd.DataFrame({'So luong': miss, 'Phan tram': miss_pct}))
+
+print(f"\n===== DUPLICATE: {df.duplicated().sum()} dong =====")
+
+# Histogram + Boxplot
+fig, axes = plt.subplots(2, 5, figsize=(22, 8))
+fig.suptitle('YC1 - Histogram & Boxplot (Du lieu goc)', fontsize=14, fontweight='bold')
+for i, col in enumerate(num_cols):
+    df[col].hist(ax=axes[0,i], bins=20, color='steelblue', edgecolor='black')
+    axes[0,i].set_title(f'Histogram: {col}', fontsize=9)
+    df.boxplot(column=col, ax=axes[1,i])
+    axes[1,i].set_title(f'Boxplot: {col}', fontsize=9)
+plt.tight_layout()
+plt.savefig(BASE / 'yc1_hist_box.png', dpi=100)
+plt.close()
+print(">> Luu: yc1_hist_box.png")
+
+# Violin plot
+fig, axes = plt.subplots(1, 5, figsize=(22, 5))
+fig.suptitle('YC1 - Violin Plot', fontsize=14, fontweight='bold')
+for i, col in enumerate(num_cols):
+    data = df[col].dropna()
+    axes[i].violinplot(data, showmedians=True)
+    axes[i].set_title(col, fontsize=9)
+    axes[i].set_xticks([])
+plt.tight_layout()
+plt.savefig(BASE / 'yc1_violin.png', dpi=100)
+plt.close()
+print(">> Luu: yc1_violin.png")
+
+# Categorical bar chart
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+fig.suptitle('YC1 - Phan tich Categorical', fontsize=14, fontweight='bold')
+for i, col in enumerate(cat_cols):
+    df[col].value_counts().head(10).plot(kind='bar', ax=axes[i],
+        color=['#4C72B0','#DD8452','#55A868'][i], edgecolor='black')
+    axes[i].set_title(col, fontsize=10, fontweight='bold')
+    axes[i].tick_params(axis='x', rotation=45, labelsize=8)
+plt.tight_layout()
+plt.savefig(BASE / 'yc1_categorical.png', dpi=100)
+plt.close()
+print(">> Luu: yc1_categorical.png")
+
+print("\n===== PHAN PHOI CATEGORICAL =====")
+for col in cat_cols:
+    print(f"\n--- {col} ---")
+    print(df[col].value_counts().to_string())
+
+# ================================================================
+# YEU CAU 2: XU LY DU LIEU BAN
+# ================================================================
+
+df_clean = df.copy()
+
+df_clean = df_clean.drop_duplicates()
+print(f"\n[YC2] Sau xoa duplicate: {len(df_clean)} dong")
+
+df_clean = df_clean[df_clean['gia_ty'] > 0]
+df_clean = df_clean[df_clean['so_phong_ngu'] > 0]
+df_clean = df_clean[(df_clean['dien_tich_m2'] > 10) & (df_clean['dien_tich_m2'] < 2000)]
+print(f"[YC2] Sau xoa khong hop le: {len(df_clean)} dong")
+
+df_clean['dien_tich_m2'] = df_clean['dien_tich_m2'].fillna(df_clean['dien_tich_m2'].median())
+df_clean['gia_ty']       = df_clean['gia_ty'].fillna(df_clean['gia_ty'].median())
+df_clean['so_phong_ngu'] = df_clean['so_phong_ngu'].fillna(df_clean['so_phong_ngu'].mode()[0])
+df_clean['so_wc']        = df_clean['so_wc'].fillna(df_clean['so_wc'].mode()[0])
+df_clean['tinh_trang']   = df_clean['tinh_trang'].fillna(df_clean['tinh_trang'].mode()[0])
+df_clean['mo_ta']        = df_clean['mo_ta'].fillna('Khong co mo ta')
+
+typo_loai = {
+    'Chung Cư':'Chung cư','chung cu':'Chung cư',
+    'Nha pho':'Nhà phố','Nhà Phố':'Nhà phố',
+    'biet thu':'Biệt thự','Biet Thu':'Biệt thự',
+    'dat nen':'Đất nền','Đất Nền':'Đất nền',
+    'Shop house':'Shophouse','SHOPHOUSE':'Shophouse',
+}
+typo_tt = {
+    'moi':'Mới','Mới ':'Mới',
+    'Cu con tot':'Cũ - còn tốt',' Cũ':'Cũ - còn tốt',
+    'Cần Sửa Chữa':'Cần sửa chữa',
+    'dang xay dung':'Đang xây dựng',
+}
+typo_quan = {
+    'Quan 1':'Quận 1','QUẬN 1':'Quận 1','quận 3':'Quận 3',
+    'Binh Thanh':'Bình Thạnh','Tan Binh ':'Tân Bình',
+    ' Quận 7':'Quận 7','Thu Duc':'Thủ Đức','Phu Nhuan':'Phú Nhuận',
+}
+
+df_clean['loai_bds']   = df_clean['loai_bds'].replace(typo_loai).str.strip()
+df_clean['tinh_trang'] = df_clean['tinh_trang'].replace(typo_tt).str.strip()
+df_clean['quan_huyen'] = df_clean['quan_huyen'].replace(typo_quan).str.strip()
+
+print("\n===== MISSING SAU XU LY =====")
+print(df_clean.isnull().sum())
+
+print("\n===== CATEGORICAL SAU XU LY =====")
+for col in cat_cols:
+    print(f"\n--- {col} ---")
+    print(df_clean[col].value_counts().to_string())
+
+df_clean.to_csv(BASE / 'proptech_clean.csv', index=False, encoding='utf-8-sig')
+print(f"\n[DONE] proptech_clean.csv ({len(df_clean)} dong)")
+
+# Bieu do sau xu ly
+fig, axes = plt.subplots(2, 5, figsize=(22, 8))
+fig.suptitle('YC2 - Histogram & Boxplot (Sau xu ly)', fontsize=14, fontweight='bold')
+for i, col in enumerate(num_cols):
+    df_clean[col].hist(ax=axes[0,i], bins=20, color='seagreen', edgecolor='black')
+    axes[0,i].set_title(f'Histogram: {col}', fontsize=9)
+    df_clean.boxplot(column=col, ax=axes[1,i])
+    axes[1,i].set_title(f'Boxplot: {col}', fontsize=9)
+plt.tight_layout()
+plt.savefig(BASE / 'yc2_after_clean.png', dpi=100)
+plt.close()
+print(">> Luu: yc2_after_clean.png")
+
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+fig.suptitle('YC2 - Categorical sau xu ly typo', fontsize=14, fontweight='bold')
+for i, col in enumerate(cat_cols):
+    df_clean[col].value_counts().plot(kind='bar', ax=axes[i],
+        color='seagreen', edgecolor='black')
+    axes[i].set_title(col, fontsize=10, fontweight='bold')
+    axes[i].tick_params(axis='x', rotation=45, labelsize=8)
+plt.tight_layout()
+plt.savefig(BASE / 'yc2_categorical_clean.png', dpi=100)
+plt.close()
+print(">> Luu: yc2_categorical_clean.png")
+
+print(f"\n===== TOM TAT =====")
+print(f"Du lieu goc  : {len(df)} dong")
+print(f"Du lieu sach : {len(df_clean)} dong")
+print(f"Da xoa       : {len(df)-len(df_clean)} dong")
