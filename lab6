@@ -1,0 +1,399 @@
+import sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
+import os
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from PIL import Image, ImageEnhance, ImageFilter
+import random
+import warnings
+warnings.filterwarnings('ignore')
+
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+
+def load_images_from_folder(folder_path, max_images=10):
+    """Load images from a folder, return list of PIL Images."""
+    supported_ext = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff')
+    images = []
+    filenames = []
+    if not os.path.exists(folder_path):
+        print(f"  [!] Folder not found: {folder_path}. Using synthetic images.")
+        return images, filenames
+    for fname in sorted(os.listdir(folder_path)):
+        if fname.lower().endswith(supported_ext):
+            path = os.path.join(folder_path, fname)
+            try:
+                img = Image.open(path).convert('RGB')
+                images.append(img)
+                filenames.append(fname)
+                if len(images) >= max_images:
+                    break
+            except Exception as e:
+                print(f"  [!] Cannot open {fname}: {e}")
+    return images, filenames
+
+
+def generate_synthetic_images(n=5, size=(224, 224), mode='color'):
+    """Generate synthetic images when no real dataset is available."""
+    imgs = []
+    palette = [
+        (255, 100, 80), (80, 160, 255), (100, 220, 100),
+        (255, 200, 60), (180, 80, 255), (60, 220, 200),
+        (255, 140, 200), (140, 100, 60), (200, 200, 100), (80, 80, 200)
+    ]
+    for i in range(n):
+        arr = np.random.randint(60, 200, (size[1], size[0], 3), dtype=np.uint8)
+        color = palette[i % len(palette)]
+        arr[:size[1]//2, :, 0] = np.clip(int(color[0] * 0.8), 0, 255)
+        arr[:size[1]//2, :, 1] = np.clip(int(color[1] * 0.8), 0, 255)
+        arr[:size[1]//2, :, 2] = np.clip(int(color[2] * 0.8), 0, 255)
+        img = Image.fromarray(arr, 'RGB')
+        if mode == 'grayscale':
+            img = img.convert('L')
+        imgs.append(img)
+    return imgs
+
+
+def resize_image(img, size=(224, 224)):
+    """Resize image to target size using LANCZOS resampling."""
+    return img.resize(size, Image.LANCZOS)
+
+
+def normalize_image(img):
+    """Normalize pixel values from [0-255] to [0-1] as numpy array."""
+    arr = np.array(img, dtype=np.float32)
+    return arr / 255.0
+
+
+def to_grayscale(img):
+    """Convert PIL RGB image to grayscale."""
+    return img.convert('L')
+
+
+def aug_horizontal_flip(img):
+    """Augmentation: horizontal flip."""
+    return img.transpose(Image.FLIP_LEFT_RIGHT)
+
+
+def aug_rotate(img, angle_range=15):
+    """Augmentation: random rotation within ±angle_range degrees."""
+    angle = random.uniform(-angle_range, angle_range)
+    return img.rotate(angle, resample=Image.BILINEAR, expand=False)
+
+
+def aug_brightness(img, factor_range=0.2):
+    """Augmentation: random brightness adjustment ±factor_range."""
+    factor = random.uniform(1.0 - factor_range, 1.0 + factor_range)
+    enhancer = ImageEnhance.Brightness(img)
+    return enhancer.enhance(factor)
+
+
+def aug_gaussian_noise(img, mean=0, std=25):
+    """Augmentation: add Gaussian noise to image."""
+    arr = np.array(img, dtype=np.float32)
+    noise = np.random.normal(mean, std, arr.shape)
+    arr = np.clip(arr + noise, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr)
+
+
+def aug_random_crop(img, crop_ratio=0.8):
+    """Augmentation: random crop then resize back to original size."""
+    w, h = img.size
+    new_w = int(w * crop_ratio)
+    new_h = int(h * crop_ratio)
+    left  = random.randint(0, w - new_w)
+    top   = random.randint(0, h - new_h)
+    img_cropped = img.crop((left, top, left + new_w, top + new_h))
+    return img_cropped.resize((w, h), Image.LANCZOS)
+
+
+def aug_zoom(img, zoom_factor=1.2):
+    """Augmentation: center zoom (crop center then resize)."""
+    w, h = img.size
+    new_w = int(w / zoom_factor)
+    new_h = int(h / zoom_factor)
+    left  = (w - new_w) // 2
+    top   = (h - new_h) // 2
+    img_cropped = img.crop((left, top, left + new_w, top + new_h))
+    return img_cropped.resize((w, h), Image.LANCZOS)
+
+
+def display_images(originals, augmented_list, aug_labels, title, save_path,
+                   show_grayscale=False, max_display=5):
+    """Display original and augmented images side by side."""
+    n = min(len(originals), max_display)
+    n_aug_types = len(augmented_list)
+    n_cols = n
+    n_rows = 1 + n_aug_types
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 3 * n_rows))
+    fig.suptitle(title, fontsize=14, fontweight='bold', y=1.01)
+
+    if n_rows == 1:
+        axes = axes.reshape(1, -1)
+    if n_cols == 1:
+        axes = axes.reshape(-1, 1)
+
+    for col in range(n):
+        img = originals[col]
+        arr = np.array(img)
+        cmap = 'gray' if (show_grayscale or arr.ndim == 2) else None
+        axes[0, col].imshow(arr, cmap=cmap)
+        axes[0, col].set_title(f'Gốc #{col+1}', fontsize=9, fontweight='bold')
+        axes[0, col].axis('off')
+
+    for row_idx, (aug_imgs, label) in enumerate(zip(augmented_list, aug_labels)):
+        for col in range(n):
+            img = aug_imgs[col]
+            arr = np.array(img)
+            cmap = 'gray' if (show_grayscale or arr.ndim == 2) else None
+            axes[row_idx + 1, col].imshow(arr, cmap=cmap)
+            axes[row_idx + 1, col].set_title(label, fontsize=8)
+            axes[row_idx + 1, col].axis('off')
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.show()
+    print(f"  >> Đã lưu: {save_path}")
+
+
+# ============================================================
+print("=" * 60)
+print("BÀI 1: CHUẨN BỊ ẢNH CĂN HỘ / MẶT TIỀN")
+print("=" * 60)
+# ============================================================
+# Bước 1: Load hoặc tạo ảnh
+FOLDER_B1 = 'Lab6_Apartment'
+images_b1, names_b1 = load_images_from_folder(FOLDER_B1, max_images=10)
+if len(images_b1) == 0:
+    print("  >> Không tìm thấy ảnh - sử dụng ảnh synthetic.")
+    images_b1 = generate_synthetic_images(n=10, size=(300, 300), mode='color')
+
+# Bước 2: Resize tất cả về 224x224
+resized_b1 = [resize_image(img) for img in images_b1]
+print(f"  [1] Resize: {len(resized_b1)} ảnh về 224x224 px")
+
+# Bước 3: Augmentation
+aug_flip_b1       = [aug_horizontal_flip(img) for img in resized_b1]
+aug_rotate_b1     = [aug_rotate(img, angle_range=15) for img in resized_b1]
+aug_brightness_b1 = [aug_brightness(img, factor_range=0.2) for img in resized_b1]
+print("  [2] Augmentation: horizontal flip, rotate ±15°, brightness ±20%")
+
+# Bước 4: Chuyển sang Grayscale
+gray_b1 = [to_grayscale(img) for img in resized_b1]
+print("  [3] Chuyển RGB → Grayscale")
+
+# Bước 5: Chuẩn hóa [0-255] → [0-1]
+norm_b1 = [normalize_image(img) for img in gray_b1]
+print(f"  [4] Chuẩn hóa pixel: min={norm_b1[0].min():.2f}, max={norm_b1[0].max():.2f}")
+
+# Bước 6: Hiển thị 5 ảnh gốc và 5 ảnh augmentation
+display_images(
+    originals       = gray_b1[:5],
+    augmented_list  = [aug_flip_b1[:5], aug_rotate_b1[:5], aug_brightness_b1[:5]],
+    aug_labels      = ['Horizontal Flip', 'Rotate ±15°', 'Brightness ±20%'],
+    title           = 'Bài 1: Ảnh Căn Hộ/Mặt Tiền - Gốc và Augmentation',
+    save_path       = 'bai1_apartment_augmentation.png',
+    show_grayscale  = True,
+    max_display     = 5
+)
+
+# Hiển thị thêm: so sánh pixel gốc vs chuẩn hóa
+print(f"\n  [5] Mẫu giá trị pixel:")
+sample_gray  = np.array(gray_b1[0])
+sample_norm  = norm_b1[0]
+print(f"      Grayscale gốc [0-255]: {sample_gray[0, :5]}")
+print(f"      Sau chuẩn hóa [0-1]:   {sample_norm[0, :5].round(3)}")
+print()
+
+
+# ============================================================
+print("=" * 60)
+print("BÀI 2: CHUẨN BỊ ẢNH XE Ô TÔ / XE MÁY")
+print("=" * 60)
+# ============================================================
+FOLDER_B2 = 'Lab6_Vehicle'
+images_b2, names_b2 = load_images_from_folder(FOLDER_B2, max_images=10)
+if len(images_b2) == 0:
+    print("  >> Không tìm thấy ảnh - sử dụng ảnh synthetic.")
+    images_b2 = generate_synthetic_images(n=10, size=(300, 250), mode='color')
+
+# Bước 1: Resize về 224x224
+resized_b2 = [resize_image(img) for img in images_b2]
+print(f"  [1] Resize: {len(resized_b2)} ảnh về 224x224 px")
+
+# Bước 2: Augmentation
+aug_noise_b2      = [aug_gaussian_noise(img, std=25) for img in resized_b2]
+aug_bright_b2     = [aug_brightness(img, factor_range=0.15) for img in resized_b2]
+aug_rotate_b2     = [aug_rotate(img, angle_range=10) for img in resized_b2]
+print("  [2] Augmentation: Gaussian noise, brightness ±15%, rotate ±10°")
+
+# Bước 3: Tùy chọn chuyển Grayscale (ở đây giữ màu cho xe)
+USE_GRAYSCALE_B2 = False
+if USE_GRAYSCALE_B2:
+    resized_b2     = [to_grayscale(img) for img in resized_b2]
+    aug_noise_b2   = [to_grayscale(img) for img in aug_noise_b2]
+    aug_bright_b2  = [to_grayscale(img) for img in aug_bright_b2]
+    aug_rotate_b2  = [to_grayscale(img) for img in aug_rotate_b2]
+    print("  [3] Đã chuyển sang Grayscale")
+else:
+    print("  [3] Giữ nguyên màu RGB (USE_GRAYSCALE_B2 = False)")
+
+# Bước 4: Chuẩn hóa [0-255] → [0-1]
+norm_b2 = [normalize_image(img) for img in resized_b2]
+print(f"  [4] Chuẩn hóa pixel: min={norm_b2[0].min():.2f}, max={norm_b2[0].max():.2f}")
+
+# Hiển thị ảnh gốc + 3 loại augmentation
+display_images(
+    originals       = resized_b2[:5],
+    augmented_list  = [aug_noise_b2[:5], aug_bright_b2[:5], aug_rotate_b2[:5]],
+    aug_labels      = ['Gaussian Noise', 'Brightness ±15%', 'Rotate ±10°'],
+    title           = 'Bài 2: Ảnh Xe Ô Tô/Xe Máy - Gốc và Augmentation',
+    save_path       = 'bai2_vehicle_augmentation.png',
+    show_grayscale  = USE_GRAYSCALE_B2,
+    max_display     = 5
+)
+
+sample_arr2 = np.array(resized_b2[0])
+norm_arr2   = norm_b2[0]
+print(f"\n  [5] Mẫu giá trị pixel:")
+print(f"      RGB gốc [0-255]: {sample_arr2[0, 0, :]}")
+print(f"      Sau chuẩn hóa [0-1]: {norm_arr2[0, 0, :].round(3)}")
+print()
+
+
+# ============================================================
+print("=" * 60)
+print("BÀI 3: CHUẨN BỊ ẢNH TRÁI CÂY / NÔNG SẢN")
+print("=" * 60)
+# ============================================================
+FOLDER_B3 = 'Lab6_Fruit'
+images_b3, names_b3 = load_images_from_folder(FOLDER_B3, max_images=10)
+if len(images_b3) == 0:
+    print("  >> Không tìm thấy ảnh - sử dụng ảnh synthetic.")
+    images_b3 = generate_synthetic_images(n=10, size=(280, 280), mode='color')
+
+# Bước 1: Resize về 224x224
+resized_b3 = [resize_image(img) for img in images_b3]
+print(f"  [1] Resize: {len(resized_b3)} ảnh về 224x224 px")
+
+# Bước 2: Augmentation - flip, random crop, zoom, rotation
+aug_flip_b3    = [aug_horizontal_flip(img) for img in resized_b3]
+aug_crop_b3    = [aug_random_crop(img, crop_ratio=0.8) for img in resized_b3]
+aug_zoom_b3    = [aug_zoom(img, zoom_factor=1.2) for img in resized_b3]
+aug_rotate_b3  = [aug_rotate(img, angle_range=30) for img in resized_b3]
+print("  [2] Augmentation: flip, random crop, zoom, rotation")
+
+# Bước 3: Chuẩn hóa về [0-1]
+norm_b3 = [normalize_image(img) for img in resized_b3]
+print(f"  [3] Chuẩn hóa pixel: min={norm_b3[0].min():.2f}, max={norm_b3[0].max():.2f}")
+
+# Bước 4: Hiển thị grid 3x3 ảnh đã augmentation
+n_grid = 9
+all_aug_b3 = (aug_flip_b3 + aug_crop_b3 + aug_zoom_b3)[:n_grid]
+fig_b3, axes_b3 = plt.subplots(3, 3, figsize=(9, 9))
+fig_b3.suptitle('Bài 3: Ảnh Trái Cây/Nông Sản - Grid 3×3 Augmentation', fontsize=14, fontweight='bold')
+aug_type_labels = ['Flip'] * len(aug_flip_b3) + ['Crop'] * len(aug_crop_b3) + ['Zoom'] * len(aug_zoom_b3)
+
+for idx, ax in enumerate(axes_b3.flat):
+    if idx < len(all_aug_b3):
+        ax.imshow(np.array(all_aug_b3[idx]))
+        ax.set_title(aug_type_labels[idx], fontsize=9)
+    ax.axis('off')
+
+plt.tight_layout()
+plt.savefig('bai3_fruit_grid3x3.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("  >> Đã lưu: bai3_fruit_grid3x3.png")
+
+# Hiển thị thêm: gốc + 4 loại augmentation side by side
+display_images(
+    originals       = resized_b3[:4],
+    augmented_list  = [aug_flip_b3[:4], aug_crop_b3[:4], aug_zoom_b3[:4], aug_rotate_b3[:4]],
+    aug_labels      = ['Flip', 'Random Crop', 'Zoom', 'Rotation'],
+    title           = 'Bài 3: Chi Tiết Augmentation Trái Cây/Nông Sản',
+    save_path       = 'bai3_fruit_detail.png',
+    show_grayscale  = False,
+    max_display     = 4
+)
+print()
+
+
+# ============================================================
+print("=" * 60)
+print("BÀI 4: CHUẨN BỊ ẢNH PHÒNG / NỘI THẤT")
+print("=" * 60)
+# ============================================================
+FOLDER_B4 = 'Lab6_Interior'
+images_b4, names_b4 = load_images_from_folder(FOLDER_B4, max_images=10)
+if len(images_b4) == 0:
+    print("  >> Không tìm thấy ảnh - sử dụng ảnh synthetic.")
+    images_b4 = generate_synthetic_images(n=10, size=(320, 240), mode='color')
+
+# Bước 1: Resize về 224x224
+resized_b4 = [resize_image(img) for img in images_b4]
+print(f"  [1] Resize: {len(resized_b4)} ảnh về 224x224 px")
+
+# Bước 2: Augmentation
+aug_rotate_b4     = [aug_rotate(img, angle_range=15) for img in resized_b4]
+aug_flip_b4       = [aug_horizontal_flip(img) for img in resized_b4]
+aug_bright_b4     = [aug_brightness(img, factor_range=0.2) for img in resized_b4]
+print("  [2] Augmentation: xoay ±15°, horizontal flip, brightness ±20%")
+
+# Bước 3: Chuyển RGB → Grayscale
+gray_b4       = [to_grayscale(img) for img in resized_b4]
+gray_rot_b4   = [to_grayscale(img) for img in aug_rotate_b4]
+gray_flip_b4  = [to_grayscale(img) for img in aug_flip_b4]
+gray_bright_b4 = [to_grayscale(img) for img in aug_bright_b4]
+print("  [3] Chuyển RGB → Grayscale")
+
+# Bước 4: Chuẩn hóa [0-255] → [0-1]
+norm_b4 = [normalize_image(img) for img in gray_b4]
+print(f"  [4] Chuẩn hóa pixel: min={norm_b4[0].min():.2f}, max={norm_b4[0].max():.2f}")
+
+# Bước 5: Hiển thị 1 ảnh gốc và 3 ảnh augmentation (cho 3 ảnh đầu)
+n_show_b4 = min(3, len(gray_b4))
+fig_b4, axes_b4 = plt.subplots(n_show_b4, 4, figsize=(14, 3.5 * n_show_b4))
+fig_b4.suptitle('Bài 4: Ảnh Phòng/Nội Thất - Gốc và 3 Augmentation (Grayscale)',
+                fontsize=13, fontweight='bold')
+
+col_titles = ['Gốc (Grayscale)', 'Xoay ±15°', 'Flip Ngang', 'Brightness ±20%']
+aug_sets_b4 = [gray_b4, gray_rot_b4, gray_flip_b4, gray_bright_b4]
+
+for row in range(n_show_b4):
+    for col, (aug_set, col_title) in enumerate(zip(aug_sets_b4, col_titles)):
+        ax = axes_b4[row, col] if n_show_b4 > 1 else axes_b4[col]
+        ax.imshow(np.array(aug_set[row]), cmap='gray')
+        if row == 0:
+            ax.set_title(col_title, fontsize=10, fontweight='bold')
+        ax.axis('off')
+
+plt.tight_layout()
+plt.savefig('bai4_interior_augmentation.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("  >> Đã lưu: bai4_interior_augmentation.png")
+
+sample_gray_b4 = np.array(gray_b4[0])
+norm_arr_b4    = norm_b4[0]
+print(f"\n  [5] Mẫu giá trị pixel:")
+print(f"      Grayscale gốc [0-255]: {sample_gray_b4[0, :5]}")
+print(f"      Sau chuẩn hóa [0-1]:   {norm_arr_b4[0, :5].round(3)}")
+
+
+# ============================================================
+print("\n" + "=" * 60)
+print("HOÀN THÀNH TẤT CẢ 4 BÀI!")
+print("Các file ảnh đã lưu:")
+saved_files = [
+    "bai1_apartment_augmentation.png",
+    "bai2_vehicle_augmentation.png",
+    "bai3_fruit_grid3x3.png",
+    "bai3_fruit_detail.png",
+    "bai4_interior_augmentation.png",
+]
+for f in saved_files:
+    print(f"  - {f}")
