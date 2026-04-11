@@ -1,0 +1,301 @@
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+import pandas as pd
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import pathlib
+
+BASE = pathlib.Path(r'C:\Users\NGUYEN CHI DUNG\OneDrive\Documents\Dungncph67511 lab3 txldl\PropTech')
+df_clean = pd.read_csv(BASE / 'proptech_clean.csv', encoding='utf-8-sig')
+
+num_cols = ['dien_tich_m2','so_phong_ngu','so_wc','so_tang','gia_ty']
+cat_cols = ['loai_bds','tinh_trang','quan_huyen']
+
+print(f"[INFO] Du lieu dau vao: {df_clean.shape[0]} dong, {df_clean.shape[1]} cot")
+
+# ================================================================
+# YEU CAU 3: PHAN TICH TUONG QUAN & XU LY OUTLIER
+# ================================================================
+
+print("\n\n========== YEU CAU 3: TUONG QUAN & OUTLIER ==========")
+
+# --- 3.1 Ma tran tuong quan ---
+corr_matrix = df_clean[num_cols].corr()
+print("\n--- Ma tran tuong quan ---")
+print(corr_matrix.round(3).to_string())
+
+fig, ax = plt.subplots(figsize=(8, 6))
+im = ax.imshow(corr_matrix.values, cmap='coolwarm', vmin=-1, vmax=1)
+plt.colorbar(im, ax=ax)
+ax.set_xticks(range(len(num_cols)))
+ax.set_yticks(range(len(num_cols)))
+ax.set_xticklabels(num_cols, rotation=45, ha='right', fontsize=9)
+ax.set_yticklabels(num_cols, fontsize=9)
+for i in range(len(num_cols)):
+    for j in range(len(num_cols)):
+        ax.text(j, i, f'{corr_matrix.values[i,j]:.2f}', ha='center', va='center', fontsize=8,
+                color='white' if abs(corr_matrix.values[i,j]) > 0.5 else 'black')
+ax.set_title('YC3 - Ma tran tuong quan (Heatmap)', fontsize=13, fontweight='bold')
+plt.tight_layout()
+plt.savefig(BASE / 'yc3_correlation_heatmap.png', dpi=100)
+plt.close()
+print(">> Luu: yc3_correlation_heatmap.png")
+
+# --- 3.2 Scatter matrix (pair plot thu cong) ---
+fig, axes = plt.subplots(len(num_cols), len(num_cols), figsize=(18, 16))
+fig.suptitle('YC3 - Scatter Matrix', fontsize=14, fontweight='bold')
+for i, col_y in enumerate(num_cols):
+    for j, col_x in enumerate(num_cols):
+        ax = axes[i, j]
+        if i == j:
+            df_clean[col_x].hist(ax=ax, bins=15, color='steelblue', edgecolor='white', linewidth=0.5)
+        else:
+            ax.scatter(df_clean[col_x], df_clean[col_y], alpha=0.3, s=8, color='#3a86ff')
+        if i == len(num_cols)-1:
+            ax.set_xlabel(col_x, fontsize=7)
+        if j == 0:
+            ax.set_ylabel(col_y, fontsize=7)
+        ax.tick_params(labelsize=6)
+plt.tight_layout()
+plt.savefig(BASE / 'yc3_scatter_matrix.png', dpi=100)
+plt.close()
+print(">> Luu: yc3_scatter_matrix.png")
+
+# --- 3.3 Phat hien & xu ly Outlier bang IQR ---
+print("\n--- Outlier theo IQR ---")
+df_no_outlier = df_clean.copy()
+outlier_report = {}
+for col in num_cols:
+    Q1 = df_no_outlier[col].quantile(0.25)
+    Q3 = df_no_outlier[col].quantile(0.75)
+    IQR = Q3 - Q1
+    lower = Q1 - 1.5 * IQR
+    upper = Q3 + 1.5 * IQR
+    mask_out = (df_no_outlier[col] < lower) | (df_no_outlier[col] > upper)
+    cnt = mask_out.sum()
+    outlier_report[col] = {'Q1': Q1, 'Q3': Q3, 'IQR': IQR,
+                            'Lower': lower, 'Upper': upper, 'Count': cnt}
+    df_no_outlier = df_no_outlier[~mask_out]
+    print(f"  {col}: {cnt} outlier | Range [{lower:.2f}, {upper:.2f}]")
+
+print(f"\n  Truoc loc outlier: {len(df_clean)} dong")
+print(f"  Sau  loc outlier: {len(df_no_outlier)} dong")
+print(f"  Da xoa           : {len(df_clean)-len(df_no_outlier)} dong outlier")
+
+# Bieu do so sanh truoc/sau outlier
+fig, axes = plt.subplots(2, 5, figsize=(22, 8))
+fig.suptitle('YC3 - Boxplot Truoc / Sau Xu Ly Outlier', fontsize=13, fontweight='bold')
+for i, col in enumerate(num_cols):
+    df_clean.boxplot(column=col, ax=axes[0,i])
+    axes[0,i].set_title(f'Truoc: {col}', fontsize=8)
+    df_no_outlier.boxplot(column=col, ax=axes[1,i])
+    axes[1,i].set_title(f'Sau: {col}', fontsize=8)
+plt.tight_layout()
+plt.savefig(BASE / 'yc3_outlier_compare.png', dpi=100)
+plt.close()
+print(">> Luu: yc3_outlier_compare.png")
+
+# Luu du lieu sau khi xu ly outlier
+df_no_outlier.to_csv(BASE / 'proptech_no_outlier.csv', index=False, encoding='utf-8-sig')
+print(f">> Luu: proptech_no_outlier.csv ({len(df_no_outlier)} dong)")
+
+# ================================================================
+# YEU CAU 4: MA HOA & CHUAN HOA DU LIEU
+# ================================================================
+
+print("\n\n========== YEU CAU 4: MA HOA & CHUAN HOA ==========")
+
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler
+
+df_encoded = df_no_outlier.copy()
+
+# --- 4.1 Label Encoding cho bien thu tu ---
+le = LabelEncoder()
+df_encoded['tinh_trang_le'] = le.fit_transform(df_encoded['tinh_trang'].astype(str))
+print("\n[Label Encoding] tinh_trang:")
+for cls, idx in zip(le.classes_, range(len(le.classes_))):
+    print(f"  {idx} -> {cls}")
+
+# --- 4.2 One-Hot Encoding cho bien danh nghia ---
+df_encoded = pd.get_dummies(df_encoded, columns=['loai_bds','quan_huyen'], prefix=['loai','quan'])
+ohe_cols_loai = [c for c in df_encoded.columns if c.startswith('loai_')]
+ohe_cols_quan = [c for c in df_encoded.columns if c.startswith('quan_')]
+print(f"\n[One-Hot Encoding] loai_bds -> {len(ohe_cols_loai)} cot")
+print(f"[One-Hot Encoding] quan_huyen -> {len(ohe_cols_quan)} cot")
+print(f"[One-Hot Encoding] Tong so cot sau OHE: {df_encoded.shape[1]}")
+
+# --- 4.3 Min-Max Scaling ---
+scaler_mm = MinMaxScaler()
+df_minmax = df_no_outlier.copy()
+df_minmax[num_cols] = scaler_mm.fit_transform(df_minmax[num_cols])
+print("\n[Min-Max Scaling] Thong ke sau chuan hoa:")
+print(df_minmax[num_cols].describe().round(4).to_string())
+
+# --- 4.4 Z-Score (Standard) Scaling ---
+scaler_std = StandardScaler()
+df_zscore = df_no_outlier.copy()
+df_zscore[num_cols] = scaler_std.fit_transform(df_zscore[num_cols])
+print("\n[Z-Score Scaling] Thong ke sau chuan hoa:")
+print(df_zscore[num_cols].describe().round(4).to_string())
+
+# Bieu do so sanh: Goc vs MinMax vs ZScore
+fig, axes = plt.subplots(3, 5, figsize=(22, 12))
+fig.suptitle('YC4 - So sanh Chuan hoa: Goc / Min-Max / Z-Score', fontsize=13, fontweight='bold')
+titles   = ['Goc', 'Min-Max', 'Z-Score']
+dfs_plot = [df_no_outlier, df_minmax, df_zscore]
+colors   = ['steelblue', 'darkorange', 'mediumseagreen']
+for r, (title, dff, clr) in enumerate(zip(titles, dfs_plot, colors)):
+    for c, col in enumerate(num_cols):
+        dff[col].hist(ax=axes[r,c], bins=20, color=clr, edgecolor='black')
+        axes[r,c].set_title(f'{title}: {col}', fontsize=8)
+plt.tight_layout()
+plt.savefig(BASE / 'yc4_scaling_compare.png', dpi=100)
+plt.close()
+print(">> Luu: yc4_scaling_compare.png")
+
+# Bieu do Boxplot so sanh MinMax vs ZScore
+fig, axes = plt.subplots(2, 5, figsize=(22, 8))
+fig.suptitle('YC4 - Boxplot Chuan hoa: Min-Max vs Z-Score', fontsize=13, fontweight='bold')
+for i, col in enumerate(num_cols):
+    df_minmax.boxplot(column=col, ax=axes[0,i])
+    axes[0,i].set_title(f'MinMax: {col}', fontsize=8)
+    df_zscore.boxplot(column=col, ax=axes[1,i])
+    axes[1,i].set_title(f'ZScore: {col}', fontsize=8)
+plt.tight_layout()
+plt.savefig(BASE / 'yc4_scaling_boxplot.png', dpi=100)
+plt.close()
+print(">> Luu: yc4_scaling_boxplot.png")
+
+# Luu cac bo du lieu da ma hoa / chuan hoa
+df_minmax.to_csv(BASE / 'proptech_minmax.csv', index=False, encoding='utf-8-sig')
+df_zscore.to_csv(BASE / 'proptech_zscore.csv', index=False, encoding='utf-8-sig')
+print(">> Luu: proptech_minmax.csv, proptech_zscore.csv")
+
+# ================================================================
+# YEU CAU 5: PHAN TICH NANG CAO & TRUC QUAN HOA
+# ================================================================
+
+print("\n\n========== YEU CAU 5: PHAN TICH NANG CAO ==========")
+
+# --- 5.1 Phan tich gia theo loai BDS ---
+print("\n--- Gia trung binh theo loai_bds ---")
+avg_price_loai = df_no_outlier.groupby('loai_bds')['gia_ty'].agg(['mean','median','count']).round(2).sort_values('mean', ascending=False)
+print(avg_price_loai.to_string())
+
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+fig.suptitle('YC5 - Phan tich Gia theo Loai BDS', fontsize=13, fontweight='bold')
+avg_price_loai['mean'].plot(kind='bar', ax=axes[0], color='#4C72B0', edgecolor='black')
+axes[0].set_title('Gia TB (ty dong) theo loai BDS', fontsize=10)
+axes[0].set_ylabel('Gia TB (ty dong)')
+axes[0].tick_params(axis='x', rotation=45, labelsize=8)
+avg_price_loai['count'].plot(kind='bar', ax=axes[1], color='#DD8452', edgecolor='black')
+axes[1].set_title('So luong listing theo loai BDS', fontsize=10)
+axes[1].set_ylabel('So luong')
+axes[1].tick_params(axis='x', rotation=45, labelsize=8)
+plt.tight_layout()
+plt.savefig(BASE / 'yc5_price_by_loai.png', dpi=100)
+plt.close()
+print(">> Luu: yc5_price_by_loai.png")
+
+# --- 5.2 Phan tich gia theo quan_huyen (Top 10) ---
+print("\n--- Gia trung binh theo quan_huyen (Top 10) ---")
+avg_price_quan = df_no_outlier.groupby('quan_huyen')['gia_ty'].mean().sort_values(ascending=False).head(10)
+print(avg_price_quan.round(2).to_string())
+
+fig, ax = plt.subplots(figsize=(14, 6))
+colors_bar = plt.cm.RdYlGn_r(np.linspace(0, 1, len(avg_price_quan)))
+avg_price_quan.plot(kind='bar', ax=ax, color=colors_bar, edgecolor='black')
+ax.set_title('YC5 - Top 10 Quan/Huyen gia BDS cao nhat', fontsize=13, fontweight='bold')
+ax.set_ylabel('Gia TB (ty dong)')
+ax.tick_params(axis='x', rotation=45, labelsize=9)
+for p in ax.patches:
+    ax.annotate(f'{p.get_height():.1f}', (p.get_x() + p.get_width()/2, p.get_height()),
+                ha='center', va='bottom', fontsize=8)
+plt.tight_layout()
+plt.savefig(BASE / 'yc5_price_by_quan.png', dpi=100)
+plt.close()
+print(">> Luu: yc5_price_by_quan.png")
+
+# --- 5.3 Phan tich moi quan he Dien tich vs Gia ---
+print("\n--- Tuong quan Dien tich vs Gia ---")
+corr_dt_gia = df_no_outlier['dien_tich_m2'].corr(df_no_outlier['gia_ty'])
+print(f"  Pearson r(dien_tich, gia_ty) = {corr_dt_gia:.4f}")
+
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+fig.suptitle('YC5 - Dien Tich vs Gia', fontsize=13, fontweight='bold')
+loai_list = df_no_outlier['loai_bds'].dropna().unique()
+cmap = plt.cm.get_cmap('tab10', len(loai_list))
+for idx, loai in enumerate(loai_list):
+    subset = df_no_outlier[df_no_outlier['loai_bds'] == loai]
+    axes[0].scatter(subset['dien_tich_m2'], subset['gia_ty'],
+                    alpha=0.4, s=15, label=loai, color=cmap(idx))
+axes[0].set_xlabel('Dien tich (m2)')
+axes[0].set_ylabel('Gia (ty dong)')
+axes[0].set_title('Scatter: Dien tich vs Gia (theo loai BDS)')
+axes[0].legend(fontsize=7, ncol=2)
+
+df_no_outlier = df_no_outlier.copy()
+df_no_outlier['gia_per_m2'] = df_no_outlier['gia_ty'] / df_no_outlier['dien_tich_m2']
+df_no_outlier['gia_per_m2'].hist(ax=axes[1], bins=30, color='#8338ec', edgecolor='black')
+axes[1].set_title('Phan phoi Gia/m2 (ty/m2)')
+axes[1].set_xlabel('Gia/m2 (ty/m2)')
+axes[1].set_ylabel('So luong')
+plt.tight_layout()
+plt.savefig(BASE / 'yc5_scatter_dt_gia.png', dpi=100)
+plt.close()
+print(">> Luu: yc5_scatter_dt_gia.png")
+
+# --- 5.4 Phan tich theo so phong ngu ---
+print("\n--- Gia TB theo so phong ngu ---")
+avg_price_phong = df_no_outlier.groupby('so_phong_ngu')['gia_ty'].agg(['mean','count']).sort_index()
+print(avg_price_phong.round(2).to_string())
+
+fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+fig.suptitle('YC5 - Phan tich theo So Phong Ngu', fontsize=13, fontweight='bold')
+avg_price_phong['mean'].plot(kind='bar', ax=axes[0], color='#3a86ff', edgecolor='black')
+axes[0].set_title('Gia TB theo so phong ngu')
+axes[0].set_xlabel('So phong ngu')
+axes[0].set_ylabel('Gia TB (ty dong)')
+avg_price_phong['count'].plot(kind='bar', ax=axes[1], color='#ff006e', edgecolor='black')
+axes[1].set_title('So luong listing theo so phong ngu')
+axes[1].set_xlabel('So phong ngu')
+axes[1].set_ylabel('So luong')
+plt.tight_layout()
+plt.savefig(BASE / 'yc5_price_by_phong.png', dpi=100)
+plt.close()
+print(">> Luu: yc5_price_by_phong.png")
+
+# --- 5.5 Phan tich tinh trang BDS ---
+print("\n--- Gia TB theo tinh trang ---")
+avg_price_tt = df_no_outlier.groupby('tinh_trang')['gia_ty'].agg(['mean','median','count']).round(2)
+print(avg_price_tt.to_string())
+
+fig, ax = plt.subplots(figsize=(10, 5))
+avg_price_tt[['mean','median']].plot(kind='bar', ax=ax,
+    color=['#2196F3','#FF5722'], edgecolor='black')
+ax.set_title('YC5 - Gia TB & Trung vi theo Tinh Trang BDS', fontsize=13, fontweight='bold')
+ax.set_ylabel('Gia (ty dong)')
+ax.tick_params(axis='x', rotation=30, labelsize=9)
+ax.legend(['Gia TB', 'Trung vi'])
+plt.tight_layout()
+plt.savefig(BASE / 'yc5_price_by_tinhtrang.png', dpi=100)
+plt.close()
+print(">> Luu: yc5_price_by_tinhtrang.png")
+
+# --- 5.6 Tong hop Insight ---
+print("\n" + "="*55)
+print("TONG HOP INSIGHT")
+print("="*55)
+print(f"  Tuong quan dien_tich <-> gia_ty : {corr_dt_gia:.4f}")
+print(f"  Loai BDS dat nhat (TB)          : {avg_price_loai['mean'].idxmax()}")
+print(f"  Loai BDS re nhat (TB)           : {avg_price_loai['mean'].idxmin()}")
+print(f"  Quan/Huyen dat nhat             : {avg_price_quan.idxmax()}")
+print(f"  Quan/Huyen re nhat  (top10)     : {avg_price_quan.idxmin()}")
+top_phong = avg_price_phong['mean'].idxmax()
+print(f"  So phong ngu co gia cao nhat    : {int(top_phong)} phong")
+print(f"  Gia/m2 trung binh               : {df_no_outlier['gia_per_m2'].mean():.4f} ty/m2")
+print("="*55)
+
+print("\n[HOAN THANH] Da xu ly xong Yeu cau 3, 4, 5!")
