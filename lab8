@@ -1,0 +1,79 @@
+def compute_simple_lot_area_model(data):
+    x = [row["LotArea"] for row in data]
+    y = [row["SalePrice"] for row in data]
+    n = len(x)
+    if n < 2:
+        return None, None
+
+    x_mean = statistics.mean(x)
+    y_mean = statistics.mean(y)
+    numerator = sum((xi - x_mean) * (yi - y_mean) for xi, yi in zip(x, y))
+    denominator = sum((xi - x_mean) ** 2 for xi in x)
+    if denominator == 0:
+        return None, None
+
+    slope = numerator / denominator
+    intercept = y_mean - slope * x_mean
+    return slope, intercept
+
+
+def print_prediction_model(data):
+    slope, intercept = compute_simple_lot_area_model(data)
+    if slope is None:
+        print("Không thể xây dựng mô hình dự đoán với dữ liệu hiện tại.")
+        return
+
+    print("Simple linear model: SalePrice = intercept + slope * LotArea")
+    print(f"  intercept = {intercept:.2f}")
+    print(f"  slope = {slope:.4f}")
+    sample_area = statistics.mean(row["LotArea"] for row in data)
+    predicted = intercept + slope * sample_area
+    print(f"  Example prediction for average lot area ({sample_area:.2f}): {predicted:.2f}")
+    print()
+
+
+def find_house_by_keyword(data, keyword: str):
+    keyword_lower = keyword.lower()
+    results = [row for row in data if keyword_lower in row["Description"].lower()]
+    print(f"Houses with keyword '{keyword}' in description: {len(results)}")
+    for row in results[:5]:
+        print(f"  Price={row['SalePrice']:.2f}, Rooms={row['Rooms']}, Neighborhood={row['Neighborhood']}, Description={row['Description']}")
+    print()
+
+
+def print_first_rows(data, count: int = 5):
+    print(f"First {count} rows")
+    print("----------------")
+    for row in data[:count]:
+        print(f"{row['SaleDate']} | {row['Neighborhood']} | Price={row['SalePrice']:.2f} | Rooms={row['Rooms']} | Garage={row['HasGarage']}")
+    print()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Chạy Lab 8 với tập dữ liệu 'ITA105_Lab_8.csv'.")
+    parser.add_argument(
+        "--file",
+        type=Path,
+        default=Path(__file__).with_name("ITA105_Lab_8.csv"),
+        help="Đường dẫn tới tệp CSV (mặc định: ITA105_Lab_8.csv).",
+    )
+    parser.add_argument("--keyword", help="Tìm kiếm nhà theo từ khóa trong mô tả.")
+    args = parser.parse_args()
+
+    csv_path = args.file
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Không tìm thấy tệp CSV: {csv_path}")
+
+    data = load_data(csv_path)
+    if not data:
+        print("Tệp CSV rỗng hoặc không có dữ liệu hợp lệ.")
+        return
+
+    print_first_rows(data)
+    summarize(data)
+    print_prediction_model(data)
+    if args.keyword:
+        find_house_by_keyword(data, args.keyword)
+
+if __name__ == "__main__":
+    main()
