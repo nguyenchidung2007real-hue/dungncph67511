@@ -1,0 +1,205 @@
+import numpy as np
+import pandas as pd
+import warnings
+warnings.filterwarnings('ignore')
+
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer, make_column_selector
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, FunctionTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+print("="*70)
+print("GIAI ĐOẠN HOÀN THIỆN - Hệ thống Dự báo Giá Bất Động Sản PropTech")
+print("="*70)
+
+ 1. TẠO DỮ LIỆU MOCK (BAO GỒM TEXT VÀ ẢNH)
+
+def generate_proptech_data(n=500):
+    np.random.seed(42)
+    # Numerical
+    area = np.random.normal(80, 30, n).clip(20, 250)
+    num_rooms = np.random.randint(1, 6, n).astype(float)
+    # Introducing missing values randomly
+    num_rooms[np.random.choice(n, int(n*0.1), replace=False)] = np.nan
+    
+    # Categorical
+    districts = ["Q1", "Q2", "Q3", "Binh Thanh", "Q7"]
+    district = np.random.choice(districts, n)
+    
+    # Text
+    descriptions = [
+        "căn hộ cao cấp view sông",
+        "nhà phố giá rẻ hẻm xe hơi",
+        "biệt thự sang trọng có hồ bơi",
+        "căn hộ sang trọng trung tâm",
+        "nhà cấp 4 cần bán gấp"
+    ]
+    description = np.random.choice(descriptions, n)
+    
+    # 
+    img_brightness = np.random.uniform(50, 200, n)
+    img_contrast = np.random.uniform(10, 100, n)
+    
+
+    dist_factor = {"Q1": 2.0, "Q2": 1.5, "Q3": 1.4, "Binh Thanh": 1.2, "Q7": 1.1}
+    # Giả sử giá = diện tích * don_gia + (số phòng * 0.5)
+    price = (area * 0.05) + (np.nan_to_num(num_rooms, nan=2) * 0.5)
+    price = price * np.array([dist_factor[d] for d in district])
+    
+    #
+    price += np.array(["sang" in desc for desc in description]) * 1.5
+    price += (img_brightness / 200) 
+    
+    # 
+    price += np.random.normal(0, 0.5, n)
+    
+    df = pd.DataFrame({
+        "area": area,
+        "num_rooms": num_rooms,
+        "district": district,
+        "description": description,
+        "img_brightness": img_brightness,
+        "img_contrast": img_contrast,
+        "price": price
+    })
+    return df
+
+df_full = generate_proptech_data(500)
+X = df_full.drop(columns=["price"])
+y = df_full["price"]
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+#
+X_test.loc[X_test.index[0], 'district'] = "Tan Binh" 
+X_test.loc[X_test.index[1], 'num_rooms'] = np.nan
+
+print(f"[*] Đã tạo tập dữ liệu huấn luyện: {X_train.shape[0]} samples")
+print(f"[*] Đã tạo tập dữ liệu kiểm thử: {X_test.shape[0]} samples (Với missing và unseen district 'Tan Binh')\n")
+
+
+# CÁC BƯỚC XỬ LÝ (PREPROCESSING) CHUNG
+
+
+# Nhận diện cột theo pattern/type
+num_cols = ["area", "num_rooms"]
+cat_cols = ["district"]
+text_cols = "description"
+img_cols = ["img_brightness", "img_contrast"]
+
+num_pipe = Pipeline([
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler())
+])
+
+cat_pipe = Pipeline([
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=False)) # Xử lý Unseen category
+])
+
+def squeeze_text(X):
+    return np.squeeze(X, axis=1)
+
+text_pipe = Pipeline([
+    ("imputer", SimpleImputer(strategy="constant", fill_value="")),
+    ("reshape", FunctionTransformer(squeeze_text, accept_sparse=False)),
+    ("tfidf", TfidfVectorizer(max_features=50))
+])
+
+img_pipe = Pipeline([
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler())
+])
+
+# YÊU CẦU 3: FEATURE INTERACTION 
+
+def add_interaction(df):
+    """
+    Tạo cột interaction mới trước khi đưa vào pipeline chuẩn.
+    df là DataFrame Pandas.
+    """
+    df_inter = df.copy()
+    
+
+    temp_rooms = df_inter['num_rooms'].fillna(df_inter['num_rooms'].median())
+    
+    # 
+    df_inter['area_x_rooms'] = df_inter['area'] * temp_rooms
+    
+    #
+   
+    area_bins = pd.cut(df_inter['area'], bins=[-np.inf, 50, 100, np.inf], labels=['Small', 'Medium', 'Large'])
+    df_inter['district_size_inter'] = df_inter['district'].astype(str) + "_" + area_bins.astype(str)
+    
+    return df_inter
+
+print("[*] Áp dụng Feature Interaction (Diện tích x Số phòng x Quận)...")
+X_train_inter = add_interaction(X_train)
+X_test_inter = add_interaction(X_test)
+
+# Chú ý
+new_num_cols = num_cols + ["area_x_rooms"]
+new_cat_cols = cat_cols + ["district_size_inter"]
+
+
+# YÊU CẦU 4: SO SÁNH MÔ HÌNH
+
+
+# - 
+print("\n--- MÔ HÌNH 1: CHỈ DÙNG NUMERICAL (Baseline) ---")
+# Sử dụng make_column_selector để "tự động chọn" các cột numeric
+ct_num_only = ColumnTransformer([
+    # Cách 1: dùng list tĩnh
+    # ("num", num_pipe, new_num_cols)
+    # Cách 2 (Yêu cầu 2): tự động phát hiện số
+    ("num", num_pipe, make_column_selector(dtype_include=np.number))
+], remainder="drop")
+
+model_num_only = Pipeline([
+    ("preprocess", ct_num_only),
+    ("rf", RandomForestRegressor(n_estimators=100, random_state=42))
+])
+
+# Lọc bỏ cột text ở model num để tránh lỗi make_column_selector tự động lấy sai,
+# thực chất make_column_selector(dtype_include=np.number) đã loại bỏ Object.
+model_num_only.fit(X_train_inter, y_train)
+y_pred_num = model_num_only.predict(X_test_inter)
+rmse_num = np.sqrt(mean_squared_error(y_test, y_pred_num))
+r2_num = r2_score(y_test, y_pred_num)
+print(f">> Kết quả (Chỉ Số): RMSE = {rmse_num:.2f} | R2 = {r2_num:.4f}")
+
+
+# ---------- MÔ HÌNH 2: FULL (NUMERICAL + TEXT + IMAGE + CATEGORY) ----------
+print("\n--- MÔ HÌNH 2: FULL PIPELINE (Số + Chữ + Ảnh + Phân Loại) ---")
+ct_full = ColumnTransformer([
+    ("num", num_pipe, new_num_cols),
+    ("cat", cat_pipe, new_cat_cols),
+    ("txt", text_pipe, [text_cols]),
+    ("img", img_pipe, img_cols)
+], remainder="drop")
+
+model_full = Pipeline([
+    ("preprocess", ct_full),
+    ("rf", RandomForestRegressor(n_estimators=100, random_state=42))
+])
+
+model_full.fit(X_train_inter, y_train)
+y_pred_full = model_full.predict(X_test_inter)
+rmse_full = np.sqrt(mean_squared_error(y_test, y_pred_full))
+r2_full = r2_score(y_test, y_pred_full)
+
+print(f">> Kết quả (Full):  RMSE = {rmse_full:.2f} | R2 = {r2_full:.4f}")
+
+# ---------- KẾT LUẬN ----------
+print("\n" + "="*70)
+print("ĐÁNH GIÁ CHUNG GIAI ĐOẠN HOÀN THIỆN:")
+print(f"1. R2 thay đổi từ {r2_num:.4f} -> {r2_full:.4f} (Độ chênh lệch: {(r2_full - r2_num):.4f})")
+print("   -> Việc đưa thêm Text (sự tồn tại của keywords) và Image Features giúp mô hình học được giá trị cộng thêm, \n      tăng nhẹ hoặc giữ tính ổn định của mô hình tổng.")
+print("2. Pipeline tự động phát hiện bằng 'make_column_selector' hoạt động tốt ở Model 1.")
+print("3. Pipeline xử lý lỗi (Unseen District 'Tan Binh') cực kỳ mượt mà không crash chương trình.")
+print("4. Feature interaction (area_x_rooms, district_size) được ánh xạ đồng nhất.")
+print("="*70)
